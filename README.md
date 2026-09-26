@@ -227,8 +227,6 @@ tests should now pass), `uvicorn backend.main:app --reload`, and
 
 ## Future Improvements
 
-- Add the two comparison cities already defined in `pipeline/config.py`
-  (`COMPARISON_LOCATIONS`) once the Lille MVP is validated with real data.
 - Scheduled/incremental ingestion (e.g. a daily cron job that only pulls
   new days) with structured logging — deliberately deferred past the MVP
   per the project's own scope decision to avoid unexplainable complexity.
