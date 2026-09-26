@@ -248,3 +248,13 @@ Airflow coordinating multiple pipeline runs with retries, backfills, and
 monitoring. The current architecture's separation into distinct,
 single-responsibility stages is exactly what makes that swap possible one
 stage at a time, without a rewrite.
+
+Author
+
+Khalil Lamrabet
+
+Engineering Student — Big Data & Artificial Intelligence
+
+GitHub: @Xerow42
+LinkedIn: khalillam12
+Email: klamrabeta19@gmail.com
