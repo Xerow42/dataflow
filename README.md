@@ -249,12 +249,14 @@ monitoring. The current architecture's separation into distinct,
 single-responsibility stages is exactly what makes that swap possible one
 stage at a time, without a rewrite.
 
-Author
+---
 
-Khalil Lamrabet
+## Author
+
+**Khalil Lamrabet**
 
 Engineering Student — Big Data & Artificial Intelligence
 
-GitHub: @Xerow42
-LinkedIn: khalillam12
-Email: klamrabeta19@gmail.com
+- GitHub: [@Xerow42](https://github.com/Xerow42)
+- LinkedIn: [khalillam12](https://www.linkedin.com/in/khalillam12/)
+- Email: [klamrabeta19@gmail.com](mailto:klamrabeta19@gmail.com)
