@@ -17,15 +17,11 @@ class Location:
     longitude: float
 
 
-# MVP: Lille only. Additional cities are added here later (Decision #6 --
-# config-driven, no code changes needed to add a city).
+# Lille is the primary MVP city. Paris and Marseille were added once the
+# Lille MVP was validated (config-driven -- no other code changes were
+# needed to add them; see Decision #6).
 LOCATIONS: List[Location] = [
     Location(city_name="Lille", country="France", latitude=50.6292, longitude=3.0573),
-]
-
-# Extra comparison cities, disabled by default. Enable by moving them into
-# LOCATIONS above once the Lille MVP is validated.
-COMPARISON_LOCATIONS: List[Location] = [
     Location(city_name="Paris", country="France", latitude=48.8566, longitude=2.3522),
     Location(city_name="Marseille", country="France", latitude=43.2965, longitude=5.3698),
 ]
