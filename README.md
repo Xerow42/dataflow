@@ -185,11 +185,7 @@ current environment).
 
 ## Known limitations
 
-This project was built inside a sandboxed environment **with no outbound
-network access** (confirmed: `pip install` and `npm install` both fail with
-no route to the package registries; `web_fetch` can only retrieve pages
-already surfaced by search, not arbitrary API calls with custom query
-parameters). Concretely, that means, in this environment:
+In this environment:
 
 - `pipeline/ingest.py` could not be run against the live Open-Meteo archive
   API to pull the full one-year history. The ingestion code is complete and
