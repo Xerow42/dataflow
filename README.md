@@ -23,7 +23,7 @@ France** (lat 50.6292, lon 3.0573): max/min/mean temperature, precipitation
 sum, max wind speed, mean humidity, and WMO weather code.
 ## Dashboard
 
-![DataFlow Dashboard](docs/screenshots/dashboard.png)
+![DataFlow Dashboard](/dashboard.png)
 ## Architecture
 
 ```
