@@ -21,7 +21,9 @@ no API key, no signup, non-commercial fair use up to ~10,000 requests/day,
 daily data back to 1940. The MVP pulls one year of daily weather for **Lille,
 France** (lat 50.6292, lon 3.0573): max/min/mean temperature, precipitation
 sum, max wind speed, mean humidity, and WMO weather code.
+## Dashboard
 
+![DataFlow Dashboard](docs/screenshots/dashboard.png)
 ## Architecture
 
 ```
