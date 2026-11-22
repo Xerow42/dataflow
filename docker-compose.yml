@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:16-alpine
@@ -9,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
       POSTGRES_DB: ${POSTGRES_DB:-dataflow}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - dataflow_pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +24,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-dataflow}:${POSTGRES_PASSWORD:-change_me}@db:5432/${POSTGRES_DB:-dataflow}
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -35,6 +33,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.pipeline
+    profiles: ["manual"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-dataflow}:${POSTGRES_PASSWORD:-change_me}@db:5432/${POSTGRES_DB:-dataflow}
     volumes:
@@ -42,7 +41,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # Not started automatically (`restart: "no"`) -- run on demand with:
+    # Manual profile keeps the ETL task out of normal `docker compose up`.
+    # Run on demand with:
     #   docker compose run pipeline --start 2024-09-01 --end 2025-08-31
     restart: "no"
 
@@ -52,7 +52,8 @@ services:
       dockerfile: docker/Dockerfile.frontend
     restart: unless-stopped
     ports:
-      - "5173:80"
+      # Local-only by default: /api/ has no authentication.
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:80"
     depends_on:
       - backend
 

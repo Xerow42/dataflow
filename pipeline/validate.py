@@ -7,11 +7,22 @@ Cleaning decides what to do with flagged rows; validation only detects.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
+import math
 from typing import Any, Dict, List
 
 from . import config
 
 REQUIRED_DAILY_FIELDS = ["time"] + config.DAILY_VARIABLES
+
+
+def _is_finite_number(value: Any) -> bool:
+    """Reject booleans, non-finite numbers, and integers too large for floats."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 @dataclass
@@ -39,12 +50,21 @@ def _check_row(row: Dict[str, Any]) -> List[str]:
     numeric_fields = [f for f in config.DAILY_VARIABLES if f != "weather_code"]
     for f in numeric_fields:
         val = row.get(f)
-        if val is not None and not isinstance(val, (int, float)):
-            errors.append(f"non-numeric value for {f}: {val!r}")
+        if val is not None and not _is_finite_number(val):
+            errors.append(f"invalid numeric value for {f}: {val!r}")
+
+    code = row.get("weather_code")
+    if code is not None and (isinstance(code, bool) or not isinstance(code, int)):
+        errors.append(f"invalid weather_code: {code!r}")
 
     tmax, tmin = row.get("temperature_2m_max"), row.get("temperature_2m_min")
-    if isinstance(tmax, (int, float)) and isinstance(tmin, (int, float)) and tmin > tmax:
+    if all(_is_finite_number(v) for v in (tmax, tmin)) and tmin > tmax:
         errors.append(f"temperature_2m_min ({tmin}) > temperature_2m_max ({tmax})")
+
+    humidity = row.get("relative_humidity_2m_mean")
+    if _is_finite_number(humidity):
+        if not 0 <= humidity <= 100:
+            errors.append(f"humidity outside 0..100: {humidity}")
 
     precip = row.get("precipitation_sum")
     if isinstance(precip, (int, float)) and precip < 0:
@@ -58,22 +78,42 @@ def _check_row(row: Dict[str, Any]) -> List[str]:
 
 
 def validate_daily_payload(payload: Dict[str, Any]) -> ValidationResult:
-    daily = payload.get("daily", {})
-    times = daily.get("time", [])
+    daily = payload.get("daily")
+    if not isinstance(daily, dict) or not isinstance(daily.get("time"), list):
+        raise ValueError("Weather payload must contain a daily object with a time array")
+    times = daily["time"]
+    if not times:
+        raise ValueError("Weather payload contains no daily observations")
 
     result = ValidationResult(records_processed=len(times))
 
     for i, day in enumerate(times):
         row = {"time": day}
+        structural_errors = []
         for f in config.DAILY_VARIABLES:
-            values = daily.get(f, [])
+            if f not in daily:
+                row[f] = None
+                structural_errors.append(f"missing field: {f}")
+                continue
+            values = daily[f]
+            if not isinstance(values, list):
+                row[f] = None
+                structural_errors.append(f"field {f} must be an array")
+                continue
+            if len(values) != len(times):
+                structural_errors.append(
+                    f"field {f} contains {len(values)} values; expected {len(times)}"
+                )
             row[f] = values[i] if i < len(values) else None
 
-        errors = _check_row(row)
+        errors = structural_errors + _check_row(row)
         if errors:
             row["_errors"] = errors
             result.invalid_rows.append(row)
         else:
+            # strptime also accepts 2026-1-2; make downstream date parsing,
+            # duplicate detection and sorting use one canonical representation.
+            row["time"] = datetime.strptime(row["time"], "%Y-%m-%d").date().isoformat()
             result.valid_rows.append(row)
 
     return result

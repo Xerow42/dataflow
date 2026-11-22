@@ -40,6 +40,46 @@ class TestClean(unittest.TestCase):
         result = clean_rows(rows)
         self.assertIsNone(result.clean_rows[0]["precipitation_sum"])
 
+    def test_multi_day_missing_temperature_is_not_imputed(self):
+        rows = [
+            {"time": "2026-01-01", "temperature_2m_mean": 10.0},
+            {"time": "2026-01-02", "temperature_2m_mean": None},
+            {"time": "2026-01-03", "temperature_2m_mean": None},
+            {"time": "2026-01-04", "temperature_2m_mean": 14.0},
+        ]
+        result = clean_rows(rows)
+        self.assertEqual(result.rows_with_imputed_values, 0)
+        self.assertIsNone(result.clean_rows[1]["temperature_2m_mean"])
+        self.assertIsNone(result.clean_rows[2]["temperature_2m_mean"])
+
+    def test_edge_gap_and_nonconsecutive_dates_are_not_imputed(self):
+        rows = [
+            {"time": "2026-01-01", "temperature_2m_mean": None},
+            {"time": "2026-01-03", "temperature_2m_mean": 10.0},
+            {"time": "2026-01-05", "temperature_2m_mean": None},
+            {"time": "2026-01-06", "temperature_2m_mean": 13.0},
+        ]
+        self.assertEqual(clean_rows(rows).rows_with_imputed_values, 0)
+
+    def test_unpadded_dates_clean_and_sort_chronologically(self):
+        rows = [
+            {"time": "2026-1-3", "temperature_2m_mean": 14.0},
+            {"time": "2026-1-2", "temperature_2m_mean": None},
+            {"time": "2026-1-1", "temperature_2m_mean": 10.0},
+            {"time": "2026-01-01", "temperature_2m_mean": 10.0},
+        ]
+        result = clean_rows(rows)
+        self.assertEqual(result.duplicates_removed, 1)
+        self.assertEqual([row["time"] for row in result.clean_rows],
+                         ["2026-01-01", "2026-01-02", "2026-01-03"])
+        self.assertEqual(result.rows_with_imputed_values, 1)
+        self.assertEqual(result.clean_rows[1]["temperature_2m_mean"], 10.0)
+
+    def test_caller_rows_are_not_mutated(self):
+        rows = [{"time": "2026-01-01", "temperature_2m_mean": 10.0}]
+        clean_rows(rows)
+        self.assertNotIn("_outlier", rows[0])
+
 
 if __name__ == "__main__":
     unittest.main()

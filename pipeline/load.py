@@ -120,32 +120,29 @@ def init_schema(conn, database_url: Optional[str] = None) -> None:
 def _get_or_create_location(conn, city_name: str, country: str, lat: float, lon: float,
                              database_url: Optional[str] = None) -> int:
     database_url = database_url or config.DATABASE_URL
-    placeholder = "?" if _is_sqlite(database_url) else "%s"
     cur = conn.cursor()
-    cur.execute(
-        f"SELECT location_id FROM locations WHERE city_name = {placeholder} AND country = {placeholder}",
-        (city_name, country),
-    )
-    row = cur.fetchone()
-    if row:
-        return row[0]
-
     if _is_sqlite(database_url):
         cur.execute(
-            "INSERT INTO locations (city_name, country, latitude, longitude) VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO locations (city_name, country, latitude, longitude) VALUES (?, ?, ?, ?)",
             (city_name, country, lat, lon),
         )
-        conn.commit()
-        return cur.lastrowid
+        cur.execute(
+            "SELECT location_id FROM locations WHERE city_name = ? AND country = ?",
+            (city_name, country),
+        )
     else:
+        # Atomic even when two workers first encounter the same city together.
         cur.execute(
             """INSERT INTO locations (city_name, country, latitude, longitude)
-               VALUES (%s, %s, %s, %s) RETURNING location_id""",
+               VALUES (%s, %s, %s, %s)
+               ON CONFLICT (city_name, country) DO UPDATE
+                   SET city_name = EXCLUDED.city_name
+               RETURNING location_id""",
             (city_name, country, lat, lon),
         )
-        location_id = cur.fetchone()[0]
-        conn.commit()
-        return location_id
+    location_id = cur.fetchone()[0]
+    conn.commit()
+    return location_id
 
 
 def _none_safe(val):
@@ -161,6 +158,13 @@ def upsert_daily_weather(conn, df: pd.DataFrame, location_id: int,
     ingested_at = datetime.now(timezone.utc).isoformat()
     cur = conn.cursor()
     rows_written = 0
+
+    if not _is_sqlite(database_url):
+        # Lock the parent city row until the upsert AND whole-history refresh
+        # commit. Same-city workers must never refresh from stale snapshots.
+        cur.execute("SELECT location_id FROM locations WHERE location_id = %s FOR UPDATE", (location_id,))
+        if cur.fetchone() is None:
+            raise ValueError(f"Unknown location_id: {location_id}")
 
     for _, r in df.iterrows():
         obs_date = r["observation_date"]
@@ -227,8 +231,33 @@ def upsert_daily_weather(conn, df: pd.DataFrame, location_id: int,
             )
         rows_written += 1
 
+    # A partial rerun can replace previously ingested observations. Recompute
+    # the seven-day calendar window over the *whole* stored history so values
+    # are independent of the size and order of ingestion batches.
+    _refresh_rolling_means(conn, location_id, database_url)
     conn.commit()
     return rows_written
+
+
+def _refresh_rolling_means(conn, location_id: int, database_url: str) -> None:
+    placeholder = "?" if _is_sqlite(database_url) else "%s"
+    cur = conn.cursor()
+    cur.execute(
+        f"""SELECT observation_date, temp_mean_c FROM daily_weather
+            WHERE location_id = {placeholder} ORDER BY observation_date""",
+        (location_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return
+    dates = pd.to_datetime([row[0] for row in rows])
+    temperatures = pd.Series([row[1] for row in rows], index=dates, dtype=float)
+    rolling = temperatures.rolling("7D", min_periods=1).mean()
+    cur.executemany(
+        f"""UPDATE daily_weather SET temp_mean_7d_rolling = {placeholder}
+            WHERE location_id = {placeholder} AND observation_date = {placeholder}""",
+        [(_none_safe(mean), location_id, obs_date) for mean, (obs_date, _) in zip(rolling, rows)],
+    )
 
 
 def record_pipeline_run(conn, started_at: str, finished_at: str, records_processed: int,

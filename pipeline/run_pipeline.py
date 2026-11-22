@@ -22,6 +22,8 @@ logger = logging.getLogger("dataflow.run_pipeline")
 def run_for_location(conn, loc: config.Location, start_date: str, end_date: str, offline: bool) -> dict:
     started_at = datetime.now(timezone.utc).isoformat()
     status = "success"
+    v_result = None
+    c_result = None
 
     try:
         if offline:
@@ -31,6 +33,8 @@ def run_for_location(conn, loc: config.Location, start_date: str, end_date: str,
             payload = ingest.fetch_daily_weather(loc, start_date, end_date)
 
         v_result = validate.validate_daily_payload(payload)
+        if not v_result.valid_rows:
+            raise ValueError(f"No valid daily observations for {loc.city_name}")
         c_result = clean.clean_rows(v_result.valid_rows)
         df = transform.rows_to_dataframe(c_result.clean_rows, loc.city_name, loc.country)
 
@@ -52,11 +56,18 @@ def run_for_location(conn, loc: config.Location, start_date: str, end_date: str,
 
     except Exception as exc:  # noqa: broad -- logged, then re-raised as a summary row
         logger.exception("Pipeline failed for %s", loc.city_name)
+        # PostgreSQL marks a transaction as aborted after a SQL error;
+        # rollback before writing the failure record or processing another city.
+        conn.rollback()
         status = "failed"
         summary = {
             "city": loc.city_name,
-            "records_processed": 0, "valid_records": 0, "invalid_records": 0,
-            "duplicates_removed": 0, "outliers_flagged": 0, "rows_written": 0,
+            "records_processed": v_result.records_processed if v_result else 0,
+            "valid_records": len(v_result.valid_rows) if v_result else 0,
+            "invalid_records": len(v_result.invalid_rows) if v_result else 0,
+            "duplicates_removed": c_result.duplicates_removed if c_result else 0,
+            "outliers_flagged": c_result.outliers_flagged if c_result else 0,
+            "rows_written": 0,
             "status": status, "error": str(exc),
         }
 
@@ -78,13 +89,25 @@ def main():
     parser.add_argument("--end", default=today.isoformat())
     parser.add_argument("--offline", action="store_true",
                          help="Replay an existing raw snapshot instead of calling the network.")
+    parser.add_argument("--city", choices=[loc.city_name for loc in config.LOCATIONS],
+                        help="Process only one city (default: all configured cities)")
     args = parser.parse_args()
+
+    try:
+        start = date.fromisoformat(args.start)
+        end = date.fromisoformat(args.end)
+    except ValueError:
+        parser.error("--start and --end must be valid YYYY-MM-DD dates")
+    if start > end:
+        parser.error("--start must not be later than --end")
 
     conn = load.get_connection()
     load.init_schema(conn)
 
     summaries = []
-    for loc in config.LOCATIONS:
+    selected_locations = [loc for loc in config.LOCATIONS
+                          if args.city is None or loc.city_name == args.city]
+    for loc in selected_locations:
         summaries.append(run_for_location(conn, loc, args.start, args.end, args.offline))
 
     conn.close()
@@ -93,4 +116,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    results = main()
+    if any(result["status"] != "success" for result in results):
+        raise SystemExit(1)

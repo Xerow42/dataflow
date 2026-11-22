@@ -10,10 +10,12 @@ SELECT
     MAX(temp_max_c)                    AS hottest_value_c,
     (SELECT observation_date FROM daily_weather dw2
         WHERE dw2.location_id = dw.location_id
+        AND dw2.observation_date BETWEEN :start_date AND :end_date
         ORDER BY temp_max_c DESC NULLS LAST LIMIT 1)  AS hottest_day,
     MIN(temp_min_c)                    AS coldest_value_c,
     (SELECT observation_date FROM daily_weather dw3
         WHERE dw3.location_id = dw.location_id
+        AND dw3.observation_date BETWEEN :start_date AND :end_date
         ORDER BY temp_min_c ASC NULLS LAST LIMIT 1)   AS coldest_day
 FROM daily_weather dw
 JOIN locations l ON l.location_id = dw.location_id
