@@ -29,7 +29,17 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    api.getCategories().then(setCities).catch(() => setCities([{ city_name: "Lille" }]));
+    api.getCategories().then((available) => {
+      setCities(available);
+      const initial = available.find((c) => c.city_name === "Lille") || available[0];
+      if (initial) {
+        setCity(initial.city_name);
+        if (initial.start_date && initial.end_date) {
+          setStart(initial.start_date);
+          setEnd(initial.end_date);
+        }
+      }
+    }).catch(() => setCities([{ city_name: "Lille" }]));
     api.getDataQuality().then(setDataQuality).catch(() => setDataQuality([]));
   }, []);
 
@@ -58,15 +68,10 @@ export default function App() {
     return () => { cancelled = true; };
   }, [city, start, end, granularity]);
 
-  const xKey = granularity === "daily" ? "observation_date" : "period";
+  // Both daily and monthly API responses identify their X-axis with `period`.
+  const xKey = "period";
 
-  const trendsForChart = useMemo(
-    () => trends.map((row) => ({
-      ...row,
-      observation_date: row.observation_date ? String(row.observation_date).slice(0, 10) : undefined,
-    })),
-    [trends]
-  );
+  const trendsForChart = useMemo(() => trends, [trends]);
 
   return (
     <div className="app">
@@ -84,7 +89,7 @@ export default function App() {
       />
 
       {error && <div className="error-banner">{error}</div>}
-      {loading && <p>Loading…</p>}
+      {loading && <p role="status">Loading…</p>}
 
       <KpiCards metrics={metrics} />
       <TemperatureTrendChart data={trendsForChart} xKey={xKey} />

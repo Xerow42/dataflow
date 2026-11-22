@@ -6,8 +6,9 @@ Exercises the exact same code path pipeline/run_pipeline.py uses.
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from pipeline import config, ingest, validate, clean, transform, load
+from pipeline import config, ingest, validate, clean, transform, load, run_pipeline
 
 FIXTURE_PATH = os.path.join(
     os.path.dirname(__file__), "..", "data", "raw", "lille_2026-09-26_2026-10-10.json"
@@ -56,6 +57,21 @@ class TestPipelineIntegration(unittest.TestCase):
         # must stay null -- not fabricated as 0 or any other value.
         cur.execute("SELECT COUNT(*) FROM daily_weather WHERE precipitation_mm IS NOT NULL")
         self.assertEqual(cur.fetchone()[0], 0)
+
+    def test_pipeline_marks_entirely_invalid_payload_as_failed(self):
+        # A syntactically valid response with no usable observations must not
+        # report a successful pipeline run with zero written records.
+        payload = {"daily": {"time": ["not-a-date"]}}
+        with patch.object(ingest, "fetch_daily_weather", return_value=payload):
+            result = run_pipeline.run_for_location(
+                self.conn, config.LOCATIONS[0], "2026-01-01", "2026-01-01", False
+            )
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["invalid_records"], 1)
+        status, invalid_records = self.conn.execute(
+            "SELECT status, invalid_records FROM pipeline_runs ORDER BY run_id DESC LIMIT 1"
+        ).fetchone()
+        self.assertEqual((status, invalid_records), ("failed", 1))
 
 
 if __name__ == "__main__":

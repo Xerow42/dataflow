@@ -227,8 +227,33 @@ def upsert_daily_weather(conn, df: pd.DataFrame, location_id: int,
             )
         rows_written += 1
 
+    # A partial rerun can replace previously ingested observations. Recompute
+    # the seven-day calendar window over the *whole* stored history so values
+    # are independent of the size and order of ingestion batches.
+    _refresh_rolling_means(conn, location_id, database_url)
     conn.commit()
     return rows_written
+
+
+def _refresh_rolling_means(conn, location_id: int, database_url: str) -> None:
+    placeholder = "?" if _is_sqlite(database_url) else "%s"
+    cur = conn.cursor()
+    cur.execute(
+        f"""SELECT observation_date, temp_mean_c FROM daily_weather
+            WHERE location_id = {placeholder} ORDER BY observation_date""",
+        (location_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return
+    dates = pd.to_datetime([row[0] for row in rows])
+    temperatures = pd.Series([row[1] for row in rows], index=dates, dtype=float)
+    rolling = temperatures.rolling("7D", min_periods=1).mean()
+    cur.executemany(
+        f"""UPDATE daily_weather SET temp_mean_7d_rolling = {placeholder}
+            WHERE location_id = {placeholder} AND observation_date = {placeholder}""",
+        [(_none_safe(mean), location_id, obs_date) for mean, (obs_date, _) in zip(rolling, rows)],
+    )
 
 
 def record_pipeline_run(conn, started_at: str, finished_at: str, records_processed: int,

@@ -45,7 +45,15 @@ def rows_to_dataframe(rows: List[Dict[str, Any]], city_name: str, country: str) 
     df["is_weekend"] = df["observation_date"].dt.dayofweek >= 5
 
     df = df.sort_values("observation_date")
-    df["temp_mean_7d_rolling"] = df["temp_mean_c"].rolling(window=7, min_periods=1).mean()
+    # A seven-calendar-day window, not merely the previous seven observations.
+    # The load layer refreshes this column across existing database records
+    # after upserts, so overlapping/incremental imports stay consistent.
+    df["temp_mean_7d_rolling"] = (
+        df.set_index("observation_date")["temp_mean_c"]
+        .rolling("7D", min_periods=1)
+        .mean()
+        .to_numpy()
+    )
 
     keep_cols = [
         "city_name", "country", "observation_date",

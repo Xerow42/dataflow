@@ -70,6 +70,33 @@ class TestLoadSQLite(unittest.TestCase):
         self.assertEqual(row[0], "success")
         self.assertEqual(row[1], 1)
 
+    def test_partial_upserts_refresh_rolling_mean_across_batches(self):
+        location_id = load._get_or_create_location(
+            self.conn, "Lille", "France", 50.6, 3.0, self.db_url
+        )
+
+        def make_df(observations):
+            rows = [{
+                "time": day, "temperature_2m_max": temp + 2,
+                "temperature_2m_min": temp - 2, "temperature_2m_mean": temp,
+                "precipitation_sum": 0.0, "wind_speed_10m_max": 8.0,
+                "relative_humidity_2m_mean": 80.0, "weather_code": 1,
+            } for day, temp in observations]
+            return transform.rows_to_dataframe(rows, "Lille", "France")
+
+        load.upsert_daily_weather(self.conn, make_df([
+            ("2026-01-01", 3.0), ("2026-01-03", 4.0)
+        ]), location_id, self.db_url)
+        load.upsert_daily_weather(self.conn, make_df([
+            ("2026-01-02", 6.0)
+        ]), location_id, self.db_url)
+
+        value = self.conn.execute(
+            "SELECT temp_mean_7d_rolling FROM daily_weather WHERE observation_date = ?",
+            ("2026-01-03",),
+        ).fetchone()[0]
+        self.assertAlmostEqual(value, (3 + 6 + 4) / 3)
+
 
 if __name__ == "__main__":
     unittest.main()

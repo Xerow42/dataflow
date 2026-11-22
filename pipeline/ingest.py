@@ -1,11 +1,10 @@
 """
 Ingestion layer.
 
-Calls the real Open-Meteo historical archive API and writes an immutable
-raw JSON snapshot to disk for every (location, date range) pull. Raw
-snapshots are never modified in place -- later stages always read from
-here and write their own output elsewhere (data/processed), so a bad
-transform can always be re-run against the original response.
+Calls the Open-Meteo historical archive API and caches the raw JSON response
+for every (location, date range) pull. A repeat fetch of the same range
+updates its cached response. Offline mode replays that saved response;
+it is a reproducibility cache, not a versioned immutable archive.
 """
 import json
 import logging
@@ -40,10 +39,8 @@ def fetch_daily_weather(
     timeout: int = 30,
 ) -> dict:
     """
-    Fetch daily weather for one location and date range from the real
-    Open-Meteo archive API, with retry/backoff. Writes the raw response
-    to data/raw/ before returning it, so ingestion always leaves an
-    immutable audit trail even if a later stage fails.
+    Fetch daily weather for one location and date range with retry/backoff.
+    Cache the raw response to data/raw/ for reproducible offline replays.
     """
     session = session or requests.Session()
     params = {

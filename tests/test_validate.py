@@ -1,4 +1,5 @@
 import unittest
+import math
 from pipeline.validate import validate_daily_payload
 
 
@@ -68,6 +69,41 @@ class TestValidate(unittest.TestCase):
         }}
         result = validate_daily_payload(payload)
         self.assertEqual(len(result.valid_rows), 1)
+
+    def test_missing_source_arrays_are_invalid(self):
+        payload = {"daily": {"time": ["2026-01-01"], "temperature_2m_max": [5.0]}}
+        result = validate_daily_payload(payload)
+        self.assertEqual(len(result.valid_rows), 0)
+        self.assertTrue(any("missing field" in error for error in result.invalid_rows[0]["_errors"]))
+
+    def test_mismatched_array_lengths_are_invalid(self):
+        payload = {"daily": {
+            "time": ["2026-01-01", "2026-01-02"],
+            "temperature_2m_max": [5.0], "temperature_2m_min": [1.0, 2.0],
+            "temperature_2m_mean": [3.0, 4.0], "precipitation_sum": [0.0, 0.0],
+            "wind_speed_10m_max": [10.0, 11.0],
+            "relative_humidity_2m_mean": [80.0, 81.0], "weather_code": [1, 2],
+        }}
+        result = validate_daily_payload(payload)
+        self.assertEqual(len(result.invalid_rows), 2)
+
+    def test_nan_and_invalid_humidity_are_invalid(self):
+        payload = {"daily": {
+            "time": ["2026-01-01"],
+            "temperature_2m_max": [5.0], "temperature_2m_min": [1.0],
+            "temperature_2m_mean": [math.nan], "precipitation_sum": [0.0],
+            "wind_speed_10m_max": [10.0],
+            "relative_humidity_2m_mean": [150.0], "weather_code": [1],
+        }}
+        self.assertEqual(len(validate_daily_payload(payload).invalid_rows), 1)
+
+    def test_invalid_payload_structure_raises(self):
+        with self.assertRaises(ValueError):
+            validate_daily_payload({"daily": {}})
+
+    def test_empty_time_array_is_not_a_successful_ingestion(self):
+        with self.assertRaises(ValueError):
+            validate_daily_payload({"daily": {"time": []}})
 
 
 if __name__ == "__main__":

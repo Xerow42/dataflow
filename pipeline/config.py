@@ -54,7 +54,8 @@ PROCESSED_DATA_DIR = os.environ.get(
 #     sqlite:///./data/dataflow.db
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./data/dataflow.db")
 
-# Outlier detection thresholds (simple, explainable IQR-style rule).
+# Outlier detection thresholds (fixed, explainable physical range rules;
+# not a statistical IQR calculation).
 OUTLIER_TEMP_MIN_C = -25.0
 OUTLIER_TEMP_MAX_C = 45.0
 OUTLIER_PRECIP_MAX_MM = 200.0

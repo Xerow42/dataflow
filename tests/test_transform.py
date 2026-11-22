@@ -35,6 +35,12 @@ class TestTransform(unittest.TestCase):
         self.assertAlmostEqual(df.iloc[0]["temp_mean_7d_rolling"], 3.0)
         self.assertAlmostEqual(df.iloc[1]["temp_mean_7d_rolling"], 3.5)
 
+    def test_rolling_mean_respects_calendar_gaps(self):
+        rows = self._sample_rows()
+        rows[0]["time"] = "2026-01-15"
+        df = rows_to_dataframe(rows, "Lille", "France")
+        self.assertAlmostEqual(df.iloc[1]["temp_mean_7d_rolling"], 4.0)
+
 
 if __name__ == "__main__":
     unittest.main()

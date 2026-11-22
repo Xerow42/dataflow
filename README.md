@@ -17,8 +17,8 @@ genuinely reproducible public dataset.
 ## Dataset
 
 **Open-Meteo Historical Weather API** (`archive-api.open-meteo.com`) — free,
-no API key, no signup, non-commercial fair use up to ~10,000 requests/day,
-daily data back to 1940. The MVP pulls one year of daily weather for **Lille,
+no API key for the public historical endpoint (check current usage terms),
+with extensive historical coverage. The MVP pulls one year of daily weather for **Lille,
 France** (lat 50.6292, lon 3.0573): max/min/mean temperature, precipitation
 sum, max wind speed, mean humidity, and WMO weather code.
 
@@ -28,8 +28,8 @@ sum, max wind speed, mean humidity, and WMO weather code.
 Open-Meteo Archive API
         │
         ▼
- [Ingestion]   pipeline/ingest.py    — HTTP + retry/backoff, writes immutable
-        │                              raw JSON snapshot to data/raw/
+ [Ingestion]   pipeline/ingest.py    — HTTP + retry/backoff, caches raw
+        │                              JSON responses in data/raw/
         ▼
  [Validation]  pipeline/validate.py  — schema, type, and range checks
         │
@@ -66,7 +66,7 @@ python -m pipeline.run_pipeline --start 2024-09-01 --end 2025-08-31
 # Offline run: replays an already-saved raw snapshot from data/raw/
 # instead of calling the network (used by the automated tests, and useful
 # in CI environments without outbound internet access)
-python -m pipeline.run_pipeline --start 2026-09-26 --end 2026-10-10 --offline
+python -m pipeline.run_pipeline --city Lille --start 2026-09-26 --end 2026-10-10 --offline
 ```
 
 ## Data Quality
@@ -81,8 +81,8 @@ Real checks, not decorative ones:
 | `temp_min > temp_max` | `validate.py` | row flagged invalid |
 | Negative precipitation / wind speed | `validate.py` | row flagged invalid |
 | Duplicate `(city, date)` | `clean.py` | duplicate removed, counted |
-| Statistical outlier (temp/precip out of realistic range) | `clean.py` | **flagged, not dropped** — `is_outlier` column, kept for the dashboard's anomaly view |
-| Single-day gap in `temperature_2m_mean` | `clean.py` | forward-filled from previous day, flagged `is_imputed` |
+| Extreme value (temperature/precipitation outside configured fixed ranges) | `clean.py` | **flagged, not dropped** — `is_outlier` column, kept for the anomaly view |
+| Isolated single-day gap in `temperature_2m_mean` | `clean.py` | filled only if both neighboring calendar days are present and non-null; flagged `is_imputed` |
 | Any other missing value (e.g. `precipitation_sum`) | *(no rule)* | left as a genuine `NULL` — **never fabricated** |
 
 Every pipeline run writes `records_processed`, `valid_records`,
@@ -105,23 +105,29 @@ external services):
 - **`pipeline_runs`** — one row per pipeline execution, feeding the
   dashboard's data-quality panel.
 
+After each upsert, the loader refreshes seven-calendar-day rolling averages
+from the full stored history for that city. This prevents overlapping or
+partial reruns from leaving inconsistent rolling statistics.
+
 Indexes on `observation_date` and `(location_id, observation_date)` support
 the date-range queries the API relies on.
 
 ## Analytics
 
-See `sql/analytics_queries.sql` for the full set (overall KPIs, monthly
-trend, daily trend, seasonal comparison, rainiest-days ranking, outlier
-view, data-quality summary). The FastAPI backend re-implements the same
-aggregations in pandas (`backend/routers/analytics.py`) so identical code
-runs against both the SQLite dev/test backend and PostgreSQL in production.
+See `sql/analytics_queries.sql` for illustrative PostgreSQL analytics queries
+(overall KPIs, monthly trends, daily trends, seasonal comparison, and data
+quality). The FastAPI backend uses parameterized selects with pandas
+aggregations (`backend/routers/analytics.py`) for consistent behavior across
+SQLite and PostgreSQL. Unknown precipitation remains `null`, not zero.
+Monthly series include null months when the database has a data gap.
 
 ## Dashboard
 
 React + Recharts. City selector, date range, daily/monthly granularity
 toggle, KPI cards (records, avg temp, total precipitation, hottest/coldest
 day), temperature trend (daily mean + 7-day rolling mean), precipitation
-bar chart, and a data-quality panel showing recent pipeline runs.
+bar chart, and a data-quality panel showing recent pipeline runs. Initial
+date filters use the available dates of the selected city, not today's date.
 
 ## Tech Stack
 
@@ -130,10 +136,12 @@ Vite · Recharts · Docker Compose.
 
 ## Installation
 
+Requirements: Python 3.12, Node.js 20.19+ for Vite 8, npm, and optionally
+Docker Desktop with Compose. Use a Python virtual environment if preferred.
+
 ```bash
-git clone <this-repo>
+git clone YOUR_REPOSITORY_URL
 cd dataflow
-cp .env.example .env          # adjust POSTGRES_PASSWORD etc.
 pip install -r requirements.txt
 ```
 
@@ -141,27 +149,40 @@ For the dashboard:
 
 ```bash
 cd frontend
-npm install
+npm ci
 ```
+
+Copy `.env.example` to `.env` and choose a private PostgreSQL password when
+using Docker Compose. The `.env` file is read by Compose, **not** automatically
+by the local Python process; set `DATABASE_URL` in your shell for local runs.
+The dashboard uses same-origin `/api` URLs: Vite proxies to port 8000 during
+development, and Docker's nginx proxies to the backend service.
 
 ## Running the pipeline
 
 **With Docker Compose (PostgreSQL):**
 ```bash
 docker compose up -d db
-docker compose run pipeline --start 2024-09-01 --end 2025-08-31
+docker compose run --rm pipeline --start 2024-09-01 --end 2025-08-31
 ```
 
 **Locally without Docker (SQLite, zero external services):**
 ```bash
-export DATABASE_URL=sqlite:///./data/dataflow.db
+export DATABASE_URL=sqlite:///./data/dataflow.db   # Bash / Git Bash
+python -m pipeline.run_pipeline --start 2024-09-01 --end 2025-08-31
+```
+
+PowerShell equivalent:
+
+```powershell
+$env:DATABASE_URL = "sqlite:///./data/dataflow.db"
 python -m pipeline.run_pipeline --start 2024-09-01 --end 2025-08-31
 ```
 
 ## Running the dashboard
 
 ```bash
-docker compose up -d          # db + backend + frontend
+docker compose up -d --build  # db + backend + frontend; pipeline is on demand
 # or, locally:
 uvicorn backend.main:app --reload --port 8000     # in one terminal
 cd frontend && npm run dev                          # in another
@@ -176,54 +197,40 @@ API: http://localhost:8000 · API docs: http://localhost:8000/docs
 python -m unittest discover -s tests -v
 ```
 
-Covers: validation rules, cleaning (dedup / outlier flagging / imputation),
-transformation (column mapping, season derivation, rolling mean), the
-SQLite load layer (idempotent `get_or_create_location` and upsert), a
-full pipeline integration test against a real captured snapshot, and API
-endpoint tests (skipped automatically if `fastapi` isn't installed in the
-current environment).
+Covers: validation rules (including malformed API payloads), cleaning
+(dedup / outlier flagging / isolated imputation), time-based rolling averages,
+SQLite idempotent upserts and cross-batch refresh, full offline integration,
+and API endpoints including null precipitation and invalid query parameters.
+API tests are automatically skipped if FastAPI is not installed.
+GitHub Actions (`.github/workflows/ci.yml`) runs the Python tests and builds
+the React dashboard on every push and pull request.
 
-## Known limitations
+## Included data and limitations
 
-This project was built inside a sandboxed environment **with no outbound
-network access** (confirmed: `pip install` and `npm install` both fail with
-no route to the package registries; `web_fetch` can only retrieve pages
-already surfaced by search, not arbitrary API calls with custom query
-parameters). Concretely, that means, in this environment:
+The ZIP includes captured public weather-data JSON files and a small
+15-day replay fixture so offline tests can run without an external API.
+The fixture came from a third-party Open-Meteo-backed proxy that did not
+expose precipitation or humidity; those fields remain genuine `null`s.
+For dashboard demonstrations with complete precipitation, run a live
+Open-Meteo pull (or use a matching snapshot captured directly from the API).
 
-- `pipeline/ingest.py` could not be run against the live Open-Meteo archive
-  API to pull the full one-year history. The ingestion code is complete and
-  correct — it will pull real data the moment it's run somewhere with
-  network access (locally, in CI, or via `docker compose run pipeline`).
-- `fastapi`, `psycopg2-binary`, and `pytest` could not be installed, so the
-  FastAPI endpoints and PostgreSQL backend could not be executed here.
-  The backend code was written to run correctly against either SQLite or
-  PostgreSQL through the same `DATABASE_URL`-driven code path, and the
-  4 API tests in `tests/test_api.py` are wired up and will run as soon as
-  `pip install -r requirements.txt` succeeds in an environment with network
-  access — they are skipped, not failed, in this one.
-- `npm install` could not run, so the React dashboard's build was not
-  verified by a bundler here. The source is written against stable,
-  pinned versions of React 18 / Vite 5 / Recharts 2, following standard
-  patterns throughout.
-- **What *was* verified for real, in this sandbox:** the entire
-  validate → clean → transform → load pipeline was executed end-to-end
-  against a small (15-day) but **genuinely real** Lille weather sample —
-  fetched live during development from a public Open-Meteo-backed proxy
-  (see `scripts/build_real_sample_fixture.py` for exactly how and from
-  where) — using the SQLite backend, including a second run proving the
-  upsert is idempotent (no duplicate rows). 18 of 22 automated tests ran
-  and passed; the 4 skipped tests are the `fastapi`-dependent ones above.
-  Two fields that proxy doesn't expose (`precipitation_sum`,
-  `relative_humidity_2m_mean`) were left as genuine `NULL`s rather than
-  invented — see the "Data Quality" table above.
+The included historical date ranges have a significant gap between
+August 2025 and August 2026. Monthly charts explicitly display this gap.
+Raw JSON files are reproducibility **caches**, not immutable audit logs:
+fetching the same city/date range overwrites the matching cache file.
+Large-scale processing, authentication, scheduling, and production operations
+are outside this educational project's current scope. PostgreSQL and Docker
+need a machine with their respective services available for end-to-end checks.
 
-**To finish verification on your machine:** run
-`pip install -r requirements.txt && cd frontend && npm install`, then
-`python -m pipeline.run_pipeline --start <a year ago> --end <today>` for
-the real one-year pull, `python -m unittest discover -s tests -v` (all 22
-tests should now pass), `uvicorn backend.main:app --reload`, and
-`npm run dev`.
+## Sharing and security
+
+- Share only source code, captured public fixtures, docs, and `.env.example`.
+- Do **not** share `.env`, `frontend/node_modules/`, `.git/`, local SQLite
+  databases, or generated build files.
+- PostgreSQL and the direct API port are bound to `127.0.0.1` by Compose;
+  the frontend nginx proxy exposes read-only weather analytics endpoints.
+- Do not expose this educational stack to the public internet without adding
+  appropriate authentication, rate limiting, HTTPS, and deployment hardening.
 
 ## Future Improvements
 
@@ -231,8 +238,8 @@ tests should now pass), `uvicorn backend.main:app --reload`, and
   new days) with structured logging — deliberately deferred past the MVP
   per the project's own scope decision to avoid unexplainable complexity.
 - Basic auth / rate limiting on the API if it were ever exposed publicly.
-- CI (GitHub Actions) running `pytest` and a `docker compose build` on
-  every push, now that the test suite exists.
+- Automated integration checks against a real PostgreSQL instance and
+  a smoke test of the full Docker Compose stack on each pull request.
 
 ## Why this generalizes to larger-scale systems
 
