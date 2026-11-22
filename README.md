@@ -208,14 +208,14 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the Python tests and builds
 the React dashboard on every push and pull request.
 
 ## Included data and limitations
- 
+
 The ZIP includes captured public weather-data JSON files and a small
 15-day replay fixture so offline tests can run without an external API.
 The fixture came from a third-party Open-Meteo-backed proxy that did not
 expose precipitation or humidity; those fields remain genuine `null`s.
 For dashboard demonstrations with complete precipitation, run a live
-Open-Meteo pull (or use a matching snapshot captured directly from the API). 
- 
+Open-Meteo pull (or use a matching snapshot captured directly from the API).
+
 The included historical date ranges have a significant gap between
 August 2025 and August 2026. Monthly charts explicitly display this gap.
 Raw JSON files are reproducibility **caches**, not immutable audit logs:
