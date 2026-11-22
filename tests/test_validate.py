@@ -88,14 +88,38 @@ class TestValidate(unittest.TestCase):
         self.assertEqual(len(result.invalid_rows), 2)
 
     def test_nan_and_invalid_humidity_are_invalid(self):
-        payload = {"daily": {
+        valid_payload = {"daily": {
             "time": ["2026-01-01"],
             "temperature_2m_max": [5.0], "temperature_2m_min": [1.0],
-            "temperature_2m_mean": [math.nan], "precipitation_sum": [0.0],
+            "temperature_2m_mean": [3.0], "precipitation_sum": [0.0],
             "wind_speed_10m_max": [10.0],
-            "relative_humidity_2m_mean": [150.0], "weather_code": [1],
+            "relative_humidity_2m_mean": [80.0], "weather_code": [1],
         }}
-        self.assertEqual(len(validate_daily_payload(payload).invalid_rows), 1)
+        for field, invalid_value in [
+            ("temperature_2m_mean", math.nan),
+            ("relative_humidity_2m_mean", 150.0),
+            ("temperature_2m_mean", 10 ** 400),
+            ("temperature_2m_max", 10 ** 400),
+            ("relative_humidity_2m_mean", 10 ** 400),
+        ]:
+            with self.subTest(field=field, invalid_value=type(invalid_value).__name__):
+                payload = {"daily": {key: list(values) for key, values in valid_payload["daily"].items()}}
+                payload["daily"][field] = [invalid_value]
+                result = validate_daily_payload(payload)
+                self.assertEqual(len(result.invalid_rows), 1)
+                self.assertTrue(any(field in error or "humidity" in error
+                                    for error in result.invalid_rows[0]["_errors"]))
+
+    def test_non_padded_date_is_normalized(self):
+        payload = {"daily": {
+            "time": ["2026-1-2"],
+            "temperature_2m_max": [5.0], "temperature_2m_min": [1.0],
+            "temperature_2m_mean": [3.0], "precipitation_sum": [0.0],
+            "wind_speed_10m_max": [10.0],
+            "relative_humidity_2m_mean": [80.0], "weather_code": [1],
+        }}
+        result = validate_daily_payload(payload)
+        self.assertEqual(result.valid_rows[0]["time"], "2026-01-02")
 
     def test_invalid_payload_structure_raises(self):
         with self.assertRaises(ValueError):

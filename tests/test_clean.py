@@ -61,6 +61,20 @@ class TestClean(unittest.TestCase):
         ]
         self.assertEqual(clean_rows(rows).rows_with_imputed_values, 0)
 
+    def test_unpadded_dates_clean_and_sort_chronologically(self):
+        rows = [
+            {"time": "2026-1-3", "temperature_2m_mean": 14.0},
+            {"time": "2026-1-2", "temperature_2m_mean": None},
+            {"time": "2026-1-1", "temperature_2m_mean": 10.0},
+            {"time": "2026-01-01", "temperature_2m_mean": 10.0},
+        ]
+        result = clean_rows(rows)
+        self.assertEqual(result.duplicates_removed, 1)
+        self.assertEqual([row["time"] for row in result.clean_rows],
+                         ["2026-01-01", "2026-01-02", "2026-01-03"])
+        self.assertEqual(result.rows_with_imputed_values, 1)
+        self.assertEqual(result.clean_rows[1]["temperature_2m_mean"], 10.0)
+
     def test_caller_rows_are_not_mutated(self):
         rows = [{"time": "2026-01-01", "temperature_2m_mean": 10.0}]
         clean_rows(rows)

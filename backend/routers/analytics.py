@@ -28,6 +28,13 @@ def _rounded_or_none(value):
     return round(float(value), 2)
 
 
+def _complete_precipitation_sum(values: pd.Series):
+    """An unknown day makes a period's precipitation total unknown."""
+    if values.empty or values.isna().any():
+        return float("nan")
+    return values.sum()
+
+
 def _fetch_daily_df(conn, city: str, start_date: str, end_date: str) -> pd.DataFrame:
     ph = placeholder()
     query = f"""
@@ -82,8 +89,8 @@ def get_metrics(
         "end": str(end),
         "records": int(len(df)),
         "avg_temp_c": _rounded_or_none(df["temp_mean_c"].mean()),
-        # min_count=1 preserves unknown precipitation as null, not 0 mm.
-        "total_precipitation_mm": _rounded_or_none(df["precipitation_mm"].sum(min_count=1)),
+        # A partial sum must not be mistaken for the period's full total.
+        "total_precipitation_mm": _rounded_or_none(_complete_precipitation_sum(df["precipitation_mm"])),
         "hottest_day": {
             "date": df.loc[hottest_idx, "observation_date"].strftime("%Y-%m-%d"),
             "temp_max_c": float(df.loc[hottest_idx, "temp_max_c"]),
@@ -117,13 +124,13 @@ def get_trends(
         out = (
             df.groupby("period")
             .agg(avg_temp_c=("temp_mean_c", "mean"),
-                 precipitation_sum_mm=("precipitation_mm", lambda x: x.sum(min_count=1)))
+                 precipitation_sum_mm=("precipitation_mm", _complete_precipitation_sum))
             .reset_index()
         )
         # Include months for which no observations exist. Without these null
         # rows, the chart misleadingly connects observations a year apart.
         full_months = pd.period_range(
-            start=out["period"].iloc[0], end=out["period"].iloc[-1], freq="M"
+            start=start.strftime("%Y-%m"), end=end.strftime("%Y-%m"), freq="M"
         ).astype(str)
         out = out.set_index("period").reindex(full_months).rename_axis("period").reset_index()
         out["avg_temp_c"] = out["avg_temp_c"].round(2)

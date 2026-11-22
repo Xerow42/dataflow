@@ -52,7 +52,8 @@ services:
       dockerfile: docker/Dockerfile.frontend
     restart: unless-stopped
     ports:
-      - "5173:80"
+      # Local-only by default: /api/ has no authentication.
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:80"
     depends_on:
       - backend
 

@@ -120,32 +120,29 @@ def init_schema(conn, database_url: Optional[str] = None) -> None:
 def _get_or_create_location(conn, city_name: str, country: str, lat: float, lon: float,
                              database_url: Optional[str] = None) -> int:
     database_url = database_url or config.DATABASE_URL
-    placeholder = "?" if _is_sqlite(database_url) else "%s"
     cur = conn.cursor()
-    cur.execute(
-        f"SELECT location_id FROM locations WHERE city_name = {placeholder} AND country = {placeholder}",
-        (city_name, country),
-    )
-    row = cur.fetchone()
-    if row:
-        return row[0]
-
     if _is_sqlite(database_url):
         cur.execute(
-            "INSERT INTO locations (city_name, country, latitude, longitude) VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO locations (city_name, country, latitude, longitude) VALUES (?, ?, ?, ?)",
             (city_name, country, lat, lon),
         )
-        conn.commit()
-        return cur.lastrowid
+        cur.execute(
+            "SELECT location_id FROM locations WHERE city_name = ? AND country = ?",
+            (city_name, country),
+        )
     else:
+        # Atomic even when two workers first encounter the same city together.
         cur.execute(
             """INSERT INTO locations (city_name, country, latitude, longitude)
-               VALUES (%s, %s, %s, %s) RETURNING location_id""",
+               VALUES (%s, %s, %s, %s)
+               ON CONFLICT (city_name, country) DO UPDATE
+                   SET city_name = EXCLUDED.city_name
+               RETURNING location_id""",
             (city_name, country, lat, lon),
         )
-        location_id = cur.fetchone()[0]
-        conn.commit()
-        return location_id
+    location_id = cur.fetchone()[0]
+    conn.commit()
+    return location_id
 
 
 def _none_safe(val):
@@ -161,6 +158,13 @@ def upsert_daily_weather(conn, df: pd.DataFrame, location_id: int,
     ingested_at = datetime.now(timezone.utc).isoformat()
     cur = conn.cursor()
     rows_written = 0
+
+    if not _is_sqlite(database_url):
+        # Lock the parent city row until the upsert AND whole-history refresh
+        # commit. Same-city workers must never refresh from stale snapshots.
+        cur.execute("SELECT location_id FROM locations WHERE location_id = %s FOR UPDATE", (location_id,))
+        if cur.fetchone() is None:
+            raise ValueError(f"Unknown location_id: {location_id}")
 
     for _, r in df.iterrows():
         obs_date = r["observation_date"]

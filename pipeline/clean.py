@@ -9,12 +9,17 @@ what happens to rows with missing values.
 """
 import logging
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from . import config
 
 logger = logging.getLogger("dataflow.clean")
+
+
+def _parse_observation_date(value: str):
+    # Match the date formats accepted by pipeline.validate._check_row.
+    return datetime.strptime(value, "%Y-%m-%d").date()
 
 
 @dataclass
@@ -30,7 +35,7 @@ def remove_duplicates(rows: List[Dict[str, Any]]):
     deduped = []
     removed = 0
     for row in rows:
-        key = row["time"]
+        key = _parse_observation_date(row["time"])
         if key in seen:
             removed += 1
             continue
@@ -59,7 +64,7 @@ def _impute_missing(rows: List[Dict[str, Any]]) -> int:
     days. Never propagate a known value through a multi-day gap or an edge.
     """
     imputed_count = 0
-    rows.sort(key=lambda row: row["time"])
+    rows.sort(key=lambda row: _parse_observation_date(row["time"]))
     missing_indices = [i for i, row in enumerate(rows)
                        if row.get("temperature_2m_mean") is None]
     for i in missing_indices:
@@ -68,9 +73,9 @@ def _impute_missing(rows: List[Dict[str, Any]]) -> int:
         previous, current, following = rows[i - 1], rows[i], rows[i + 1]
         if previous.get("temperature_2m_mean") is None or following.get("temperature_2m_mean") is None:
             continue
-        previous_date = date.fromisoformat(previous["time"])
-        current_date = date.fromisoformat(current["time"])
-        next_date = date.fromisoformat(following["time"])
+        previous_date = _parse_observation_date(previous["time"])
+        current_date = _parse_observation_date(current["time"])
+        next_date = _parse_observation_date(following["time"])
         if current_date - previous_date != timedelta(days=1) or next_date - current_date != timedelta(days=1):
             continue
         current["temperature_2m_mean"] = previous["temperature_2m_mean"]
@@ -82,6 +87,8 @@ def _impute_missing(rows: List[Dict[str, Any]]) -> int:
 def clean_rows(rows: List[Dict[str, Any]]) -> CleaningResult:
     # Do not mutate validation results held by callers.
     deduped, dup_count = remove_duplicates([dict(row) for row in rows])
+    for row in deduped:
+        row["time"] = _parse_observation_date(row["time"]).isoformat()
 
     outlier_count = 0
     for row in deduped:

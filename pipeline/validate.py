@@ -15,6 +15,16 @@ from . import config
 REQUIRED_DAILY_FIELDS = ["time"] + config.DAILY_VARIABLES
 
 
+def _is_finite_number(value: Any) -> bool:
+    """Reject booleans, non-finite numbers, and integers too large for floats."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 @dataclass
 class ValidationResult:
     valid_rows: List[Dict[str, Any]] = field(default_factory=list)
@@ -40,11 +50,7 @@ def _check_row(row: Dict[str, Any]) -> List[str]:
     numeric_fields = [f for f in config.DAILY_VARIABLES if f != "weather_code"]
     for f in numeric_fields:
         val = row.get(f)
-        if val is not None and (
-            isinstance(val, bool)
-            or not isinstance(val, (int, float))
-            or not math.isfinite(val)
-        ):
+        if val is not None and not _is_finite_number(val):
             errors.append(f"invalid numeric value for {f}: {val!r}")
 
     code = row.get("weather_code")
@@ -52,12 +58,11 @@ def _check_row(row: Dict[str, Any]) -> List[str]:
         errors.append(f"invalid weather_code: {code!r}")
 
     tmax, tmin = row.get("temperature_2m_max"), row.get("temperature_2m_min")
-    if all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-           for v in (tmax, tmin)) and tmin > tmax:
+    if all(_is_finite_number(v) for v in (tmax, tmin)) and tmin > tmax:
         errors.append(f"temperature_2m_min ({tmin}) > temperature_2m_max ({tmax})")
 
     humidity = row.get("relative_humidity_2m_mean")
-    if isinstance(humidity, (int, float)) and not isinstance(humidity, bool) and math.isfinite(humidity):
+    if _is_finite_number(humidity):
         if not 0 <= humidity <= 100:
             errors.append(f"humidity outside 0..100: {humidity}")
 
@@ -106,6 +111,9 @@ def validate_daily_payload(payload: Dict[str, Any]) -> ValidationResult:
             row["_errors"] = errors
             result.invalid_rows.append(row)
         else:
+            # strptime also accepts 2026-1-2; make downstream date parsing,
+            # duplicate detection and sorting use one canonical representation.
+            row["time"] = datetime.strptime(row["time"], "%Y-%m-%d").date().isoformat()
             result.valid_rows.append(row)
 
     return result

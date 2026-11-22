@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
 from pipeline import load, transform
 
@@ -96,6 +97,33 @@ class TestLoadSQLite(unittest.TestCase):
             ("2026-01-03",),
         ).fetchone()[0]
         self.assertAlmostEqual(value, (3 + 6 + 4) / 3)
+
+    def test_postgres_location_creation_is_atomic(self):
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = (42,)
+        result = load._get_or_create_location(
+            connection, "Lille", "France", 50.6, 3.0,
+            "postgresql://dataflow:pass@localhost/dataflow",
+        )
+        self.assertEqual(result, 42)
+        sql = connection.cursor.return_value.execute.call_args.args[0]
+        self.assertIn("ON CONFLICT (city_name, country)", sql)
+        self.assertIn("RETURNING location_id", sql)
+        connection.commit.assert_called_once()
+
+    def test_postgres_locks_city_before_upsert_and_refresh(self):
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = (42,)
+        with patch.object(load, "_refresh_rolling_means") as refresh:
+            load.upsert_daily_weather(
+                connection, self._sample_df(), 42,
+                "postgresql://dataflow:pass@localhost/dataflow",
+            )
+            refresh.assert_called_once()
+        commands = [call.args[0] for call in connection.cursor.return_value.execute.call_args_list]
+        self.assertIn("FOR UPDATE", commands[0])
+        self.assertIn("INSERT INTO daily_weather", commands[1])
+        connection.commit.assert_called_once()
 
 
 if __name__ == "__main__":
