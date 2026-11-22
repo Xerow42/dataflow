@@ -21,7 +21,9 @@ no API key for the public historical endpoint (check current usage terms),
 with extensive historical coverage. The MVP pulls one year of daily weather for **Lille,
 France** (lat 50.6292, lon 3.0573): max/min/mean temperature, precipitation
 sum, max wind speed, mean humidity, and WMO weather code.
+## Dashboard
 
+![DataFlow Dashboard](/dashboard.png)
 ## Architecture
 
 ```
@@ -206,14 +208,14 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the Python tests and builds
 the React dashboard on every push and pull request.
 
 ## Included data and limitations
-
+ 
 The ZIP includes captured public weather-data JSON files and a small
 15-day replay fixture so offline tests can run without an external API.
 The fixture came from a third-party Open-Meteo-backed proxy that did not
 expose precipitation or humidity; those fields remain genuine `null`s.
 For dashboard demonstrations with complete precipitation, run a live
-Open-Meteo pull (or use a matching snapshot captured directly from the API).
-
+Open-Meteo pull (or use a matching snapshot captured directly from the API). 
+ 
 The included historical date ranges have a significant gap between
 August 2025 and August 2026. Monthly charts explicitly display this gap.
 Raw JSON files are reproducibility **caches**, not immutable audit logs:
@@ -255,3 +257,15 @@ Airflow coordinating multiple pipeline runs with retries, backfills, and
 monitoring. The current architecture's separation into distinct,
 single-responsibility stages is exactly what makes that swap possible one
 stage at a time, without a rewrite.
+
+---
+
+## Author
+
+**Khalil Lamrabet**
+
+Engineering Student — Big Data & Artificial Intelligence
+
+- GitHub: [@Xerow42](https://github.com/Xerow42)
+- LinkedIn: [khalillam12](https://www.linkedin.com/in/khalillam12/)
+- Email: [klamrabeta19@gmail.com](mailto:klamrabeta19@gmail.com)
